@@ -1,30 +1,3 @@
-// import OpenAI from "openai";
-// import dotenv from "dotenv";
-// dotenv.config();
-
-// const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// // Parse a spoken attendance command into structured JSON
-// export async function parseAttendanceCommand(transcript) {
-//   const prompt = `
-// You are an assistant that extracts attendance data.
-// Convert the sentence into structured JSON with:
-// { "className": "", "present": [], "absent": [] }
-// Example: "Mark all present except Ramesh and Priya in Class 7B"
-// → { "className": "7B", "present": "all except Ramesh and Priya", "absent": ["Ramesh", "Priya"] }
-// User said: "${transcript}"
-//   `;
-
-//   const response = await openai.chat.completions.create({
-//     model: "gpt-4o-mini",
-//     messages: [{ role: "user", content: prompt }],
-//   });
-
-//   return JSON.parse(response.choices[0].message.content);
-// }
-
-
-// server/utils/openai.js
 import OpenAI from "openai";
 import dotenv from "dotenv";
 dotenv.config();
@@ -34,21 +7,55 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-/**
- * parseAttendanceCommand(transcript)
- * Returns a structured object:
- * { className: "7B", action: "mark all present", exceptions: ["Ramesh", "Priya"] }
- */
-export async function parseAttendanceCommand(transcript) {
-  const system = `You are an assistant that extracts structured attendance commands from a teacher's spoken instruction.
-Return only valid JSON, with keys:
-- className (string)
-- action (string) - short description like "mark all present" or "mark all absent"
-- exceptions (array of student names)
-If you cannot parse, return {"error":"..."}.
-`;
+function extractJson(text) {
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (codeBlockMatch) return codeBlockMatch[1].trim();
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1) return text.slice(firstBrace, lastBrace + 1);
+  return text;
+}
 
-  const user = `Input: "${transcript}"\n\nExample output:\n{"className":"7B","action":"mark all present","exceptions":["Ramesh","Priya"]}\n\nNow parse and output only JSON.`;
+export async function parseAttendanceCommand(transcript) {
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(new Date().setDate(new Date().getDate() - 1)).toISOString().slice(0, 10);
+
+  const system = `You are an assistant that extracts structured attendance commands from a teacher's spoken instruction.
+    The current date is ${today}.
+    When the user says "today", use "${today}".
+    When the user says "yesterday", use "${yesterday}".
+
+    First, classify the user's intent as "CREATE", "UPDATE", or "DELETE".
+    Then, extract the relevant details into a "payload" object.
+    For the "className", extract only the core identifier (e.g., for "Class 10A", return "10A"). Do not include the word "Class".
+
+    Return only a valid JSON object with "intent" and "payload" keys.
+
+    - For CREATE: payload should contain "className" and "students" array with "name" and "status".
+    - For UPDATE: payload should contain a "filter" (e.g., className) and an "updates" object.
+      - If changing a class name, "updates" should be '{"newClassName":"..."}'.
+      - If changing a student's name, "updates" should be '{"studentNameChange":{"from":"...","to":"..."}}'.
+      - If changing student status, "updates" should be '{"students":[...]}'.
+    - For DELETE: payload should contain a "filter" (e.g., className, date) to identify the record to delete.
+
+    If you cannot parse, return {"error":"..."}.
+    `;
+
+  const user = `Input: "${transcript}"
+
+    Examples:
+    - Input: "Delete the attendance for Class 9 from yesterday"
+      Output: {"intent":"DELETE","payload":{"filter":{"className":"9","date":"${yesterday}"}}}}
+    - Input: "Change the name of class 10A to 10A-New"
+      Output: {"intent":"UPDATE","payload":{"filter":{"className":"10A"},"updates":{"newClassName":"10A-New"}}}
+    - Input: "In class 10a, change the name Ramesh to Rakesh"
+      Output: {"intent":"UPDATE","payload":{"filter":{"className":"10a"},"updates":{"studentNameChange":{"from":"Ramesh","to":"Rakesh"}}}}
+    - Input: "In today's 10A class, mark Arjun as present"
+      Output: {"intent":"UPDATE","payload":{"filter":{"className":"10A","date":"${today}"},"updates":{"students":[{"name":"Arjun","status":"present"}]}}}
+
+    Now parse the following input and output only the JSON:
+    Input: "${transcript}"
+    `;
 
   try {
     const resp = await client.chat.completions.create({
@@ -58,11 +65,10 @@ If you cannot parse, return {"error":"..."}.
         { role: "user", content: user },
       ],
       temperature: 0,
-      max_tokens: 200,
+      max_tokens: 400,
     });
 
     const raw = resp.choices?.[0]?.message?.content || "";
-    // try to JSON parse; sometimes model returns code block -> extract json
     const jsonText = extractJson(raw);
     return JSON.parse(jsonText);
   } catch (err) {
@@ -72,21 +78,27 @@ If you cannot parse, return {"error":"..."}.
 }
 
 export async function parseAttendanceQuery(transcript) {
+  const today = new Date().toISOString().slice(0, 10);
+  const yesterday = new Date(new Date().setDate(new Date().getDate() - 1)).toISOString().slice(0, 10);
+
   const system = `You are an assistant that extracts query parameters from a user's spoken question about student attendance.
-Return only valid JSON, with keys:
-- className (string)
-- date (string, in YYYY-MM-DD format)
-- query (string) - what the user is asking for, e.g., "present", "absent", "all"
-If you cannot parse, return {"error":"..."}.
+    The current date is ${today}.
+    When the user says "today", use "${today}".
+    When the user says "yesterday", use "${yesterday}".
 
-Examples:
-- "Who was present in Class 10A yesterday?" -> {"className":"10A","date":"2025-10-15","query":"present"}
-- "Who was absent in Class 9 on October 15 2025?" -> {"className":"9","date":"2025-10-15","query":"absent"}
-- "Show me all attendance for Class 7B" -> {"className":"7B","query":"all"}
-- "List all students in Class 5" -> {"className":"5","query":"all"}
+    Return only valid JSON, with keys:
+    - className (string)
+    - date (string, optional, in YYYY-MM-DD format)
+    - query (string) - what the user is asking for, e.g., "present", "absent", "all"
+    If you cannot parse, return {"error":"..."}.
 
-Your response must be only the JSON object. Do not include any other text or explanations.
-`;
+    Examples:
+    - "Who was present in Class 10A yesterday?" -> {"className":"10A","date":"${yesterday}","query":"present"}
+    - "Show me attendance for Class 7B today" -> {"className":"7B","date":"${today}","query":"all"}
+    - "Who was present in Class 10a" -> {"className":"10a","query":"present"}
+
+    Your response must be only the JSON object. Do not include any other text or explanations.
+    `;
 
   const user = `Input: "${transcript}"\n\nNow parse and output only JSON.`;
 
@@ -108,15 +120,4 @@ Your response must be only the JSON object. Do not include any other text or exp
     console.error("OpenAI query parse error:", err?.message || err);
     return { error: err?.message || "openai_query_error" };
   }
-}
-
-function extractJson(text) {
-  // strip markdown ```json blocks if present
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  if (codeBlockMatch) return codeBlockMatch[1].trim();
-  // attempt to find first {...}
-  const firstBrace = text.indexOf("{");
-  const lastBrace = text.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1) return text.slice(firstBrace, lastBrace + 1);
-  return text;
 }

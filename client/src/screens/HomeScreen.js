@@ -1,15 +1,15 @@
 
 import React, { useState, useEffect } from "react";
-import { View, FlatList, Text, StyleSheet, TextInput, PermissionsAndroid, Platform, ActivityIndicator, TouchableOpacity } from "react-native";
-import { Button, Card, IconButton, FAB } from "react-native-paper";
+import { View, FlatList, Text, StyleSheet, TextInput, PermissionsAndroid, Platform, ActivityIndicator } from "react-native";
+import { Button, Card, IconButton, FAB, Portal, Dialog, Paragraph } from "react-native-paper";
 import { startListening, stopListening, addEventListener } from "@ascendtis/react-native-voice-to-text";
 import { fetchAttendance, markAttendanceByVoice, queryAttendanceByVoice } from "../api/attendanceApi";
 
 const sampleCommands = [
   "Mark all present in Class 10A.",
   "Mark Ramesh and Priya absent in Class 7B.",
+  "Delete the attendance for Class 7B from yesterday.",
   "Who was absent in Class 9 yesterday?",
-  "Who was present in Class 10A on October 16 2025?",
 ];
 
 export default function HomeScreen() {
@@ -20,6 +20,11 @@ export default function HomeScreen() {
   const [responseMsg, setResponseMsg] = useState("");
   const [queryResult, setQueryResult] = useState(null);
   const [fabOpen, setFabOpen] = useState(false);
+
+  // State for confirmation dialog
+  const [dialogVisible, setDialogVisible] = useState(false);
+  const [dialogMessage, setDialogMessage] = useState("");
+  const [commandToConfirm, setCommandToConfirm] = useState("");
 
   useEffect(() => {
     loadAttendance();
@@ -51,7 +56,8 @@ export default function HomeScreen() {
   }, []);
 
   const loadAttendance = () => {
-    fetchAttendance().then(setRecords).catch(err => console.error("Error fetching attendance:", err));
+    setLoading(true);
+    fetchAttendance().then(setRecords).catch(err => console.error("Error fetching attendance:", err)).finally(() => setLoading(false));
   };
 
   async function requestMicrophonePermission() {
@@ -78,13 +84,12 @@ export default function HomeScreen() {
     try {
       if (isListening) {
         await stopListening();
-        setIsListening(false);
       } else {
         setCommand("");
         setResponseMsg("");
         await startListening();
-        setIsListening(true);
       }
+      setIsListening(!isListening);
     } catch (err) {
       console.error("Voice toggle error:", err);
       setIsListening(false);
@@ -95,16 +100,42 @@ export default function HomeScreen() {
     if (!command) return;
     setLoading(true);
     setResponseMsg("");
+    setQueryResult(null);
     try {
-      const res = await markAttendanceByVoice(command);
-      setResponseMsg(res?.message || "No response from server");
-      setCommand("");
-      loadAttendance(); // Refresh list
+      const res = await markAttendanceByVoice(command, false); // force=false for initial request
+
+      if (res.confirmationRequired) {
+        setDialogMessage(res.message);
+        setCommandToConfirm(command);
+        setDialogVisible(true);
+        setLoading(false);
+      } else {
+        setResponseMsg(res?.message || "Action completed successfully.");
+        setCommand("");
+        loadAttendance();
+      }
     } catch (err) {
       console.error(err);
       setResponseMsg(err?.response?.data?.message || "Error sending command");
+      setLoading(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    setDialogVisible(false);
+    setLoading(true);
+    setResponseMsg("");
+    try {
+      const res = await markAttendanceByVoice(commandToConfirm, true); // force=true for confirmed request
+      setResponseMsg(res?.message || "Action confirmed and completed.");
+      setCommand("");
+      loadAttendance();
+    } catch (err) {
+      console.error(err);
+      setResponseMsg(err?.response?.data?.message || "Error confirming action");
     } finally {
       setLoading(false);
+      setCommandToConfirm("");
     }
   };
 
@@ -115,13 +146,14 @@ export default function HomeScreen() {
     setQueryResult(null);
     try {
       const res = await queryAttendanceByVoice(command);
-      setResponseMsg(res?.message || "No response from server");
+      setResponseMsg(res?.message || "Query processed.");
       setQueryResult(res?.data);
       setCommand("");
     } catch (err) {
       console.error(err);
       setResponseMsg(err?.response?.data?.message || "Error sending query");
-    } finally {
+    }
+    finally {
       setLoading(false);
     }
   };
@@ -134,6 +166,19 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
+      <Portal>
+        <Dialog visible={dialogVisible} onDismiss={() => setDialogVisible(false)}>
+          <Dialog.Title>Confirmation Required</Dialog.Title>
+          <Dialog.Content>
+            <Paragraph>{dialogMessage}</Paragraph>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setDialogVisible(false)}>Cancel</Button>
+            <Button onPress={handleConfirm}>Confirm</Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
       <FlatList
         data={records}
         keyExtractor={(item) => item._id}
@@ -147,6 +192,8 @@ export default function HomeScreen() {
         )}
         ListEmptyComponent={<View style={styles.emptyContainer}><Text>No attendance records yet.</Text></View>}
         contentContainerStyle={{ flexGrow: 1 }}
+        onRefresh={loadAttendance}
+        refreshing={loading}
       />
 
       {queryResult && (

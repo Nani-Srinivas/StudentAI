@@ -14,8 +14,8 @@ const prodApiUrl = "https://your-production-server.com/api/attendance";
 
 const API_BASE = isDevelopment ? devApiUrl : prodApiUrl;
 
-export const markAttendanceByVoice = async (transcript) => {
-  const { data } = await axios.post(`${API_BASE}/voice`, { transcript });
+export const markAttendanceByVoice = async (transcript, force = false) => {
+  const { data } = await axios.post(`${API_BASE}/voice`, { transcript, force });
   return data;
 };
 
