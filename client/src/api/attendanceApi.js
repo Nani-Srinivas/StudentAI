@@ -1,6 +1,18 @@
 import axios from "axios";
-// const API_BASE = "http://localhost:5000/api/attendance";
-const API_BASE = "http://192.168.1.32:5000/api/attendance";
+import { Platform } from "react-native";
+
+// Use __DEV__ to toggle between development and production endpoints
+const isDevelopment = __DEV__;
+
+// In development, for Android emulator, use 10.0.2.2 to connect to your host machine's localhost.
+// For iOS simulator, 'localhost' works.
+const devApiHost = Platform.OS === "android" ? "10.0.2.2" : "localhost";
+const devApiUrl = `http://${devApiHost}:5000/api/attendance`;
+
+// In production, this should be your deployed backend URL.
+const prodApiUrl = "https://your-production-server.com/api/attendance";
+
+const API_BASE = isDevelopment ? devApiUrl : prodApiUrl;
 
 export const markAttendanceByVoice = async (transcript) => {
   const { data } = await axios.post(`${API_BASE}/voice`, { transcript });
