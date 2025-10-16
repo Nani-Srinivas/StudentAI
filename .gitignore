@@ -1,0 +1,55 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# React Native
+/android/build/
+/android/app/build/
+/android/.gradle/
+/android/app/src/main/assets/index.android.bundle
+/android/app/src/main/res/drawable-mdpi/
+/android/app/src/main/res/drawable-hdpi/
+/android/app/src/main/res/drawable-xhdpi/
+/android/app/src/main/res/drawable-xxhdpi/
+/android/app/src/main/res/drawable-xxxhdpi/
+/ios/build/
+/ios/Pods/
+*.jks
+*.keystore
+/client/ios/build/
+/client/android/build/
+/client/android/app/build/
+/client/android/.gradle/
+/client/node_modules/
+/server/node_modules/
+
+# IDE files
+.idea/
+*.iml
+*.vs/
+*.vscode/
+.DS_Store
+
+# Build artifacts
+/build/
+/dist/
+/public/
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Misc
+.npm
+.yarn-cache
+.yarn-integrity
+.yarn-metadata.json
